@@ -848,8 +848,69 @@ a.card{background:linear-gradient(135deg,#C49369 0%,#BD8A5B 58%,#B98255 100%);co
   var pets = [], adoptedPets = [];
   var ADOPTION_FORM_URL = 'https://docs.google.com/forms/d/e/1FAIpQLSdWVohTxUPL0DdRdDUi1yyeIdmtBq3AkYVWKzDETgiyXIDMYQ/viewform';
 
-  // Apps Script bridge: simple POST (text/plain, no preflight) -> JSON response.
-  function apiPost(data){
+  // ---- Apps Script bridge ----
+  // 1) Normal path: simple POST via fetch (text/plain, no preflight).
+  // 2) If the browser/network blocks that POST, fall back to routes that need no CORS:
+  //    JSONP GET for login/logout/adopt/delete, and a hidden form POST (+ list check) for addPet.
+  //    The backend actions are idempotent, so retrying after an unreadable response is safe.
+  var RPC_OK = {login:1, logout:1, adoptPet:1, deletePet:1};
+  var UNREACHABLE = 'Hindi maabot ang backend. Tingnan ang internet at ang API_URL.';
+  function newId(){
+    try { if(window.crypto && crypto.randomUUID) return crypto.randomUUID(); } catch(e){}
+    return Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
+  }
+  function jsonpCall(query){
+    return new Promise(function(resolve, reject){
+      var cb = 'sasRpc_' + Date.now() + '_' + Math.floor(Math.random()*100000);
+      var script = document.createElement('script'), done = false;
+      function cleanup(){ done = true; try { delete window[cb]; } catch(e){ window[cb] = undefined; } script.remove(); }
+      window[cb] = function(d){ if(done) return; cleanup(); resolve(d); };
+      script.onerror = function(){ if(done) return; cleanup(); reject(new Error(UNREACHABLE)); };
+      script.src = API_URL + '?' + query + '&callback=' + encodeURIComponent(cb) + '&_=' + Date.now();
+      document.head.appendChild(script);
+      window.setTimeout(function(){ if(!done){ cleanup(); reject(new Error('Nag-timeout ang backend. Subukan ulit.')); } }, 20000);
+    });
+  }
+  function submitHiddenForm(data){
+    var fname = 'sasPostFrame', fr = document.getElementById(fname);
+    if(!fr){
+      fr = document.createElement('iframe'); fr.name = fname; fr.id = fname; fr.title = 'upload';
+      fr.setAttribute('aria-hidden', 'true'); fr.tabIndex = -1;
+      fr.style.cssText = 'position:absolute;width:0;height:0;border:0;visibility:hidden';
+      document.body.appendChild(fr);
+    }
+    var f = document.createElement('form'); f.method = 'POST'; f.action = API_URL; f.target = fname;
+    f.acceptCharset = 'UTF-8'; f.style.display = 'none';
+    var i = document.createElement('input'); i.type = 'hidden'; i.name = 'payload'; i.value = JSON.stringify(data);
+    f.appendChild(i); document.body.appendChild(f); f.submit();
+    window.setTimeout(function(){ f.remove(); }, 1500);
+  }
+  function listQuery(){ return 'action=list' + (apiToken ? '&token=' + encodeURIComponent(apiToken) : ''); }
+  function sleep(ms){ return new Promise(function(r){ window.setTimeout(r, ms); }); }
+  function addPetFallback(data){
+    // The hidden form POST needs no CORS but its reply is unreadable, so we ask the backend
+    // (by clientId) whether the listing was created. Repeating the request cannot duplicate it.
+    var started = Date.now();
+    function check(){
+      return jsonpCall('action=rpc&payload=' + encodeURIComponent(JSON.stringify({action:'checkClient', clientId:data.clientId})))
+        .then(function(r){ return !!(r && r.success && r.found); });
+    }
+    function poll(){
+      if(Date.now() - started > 35000) throw new Error('Hindi nakumpirma kung na-save ang listing. Tingnan ang Adopt page, at kung wala, mag-login ulit at subukan.');
+      return sleep(2500).then(check).then(function(found){ return found ? {success:true} : poll(); });
+    }
+    return check().then(function(found){
+      if(found) return {success:true};
+      submitHiddenForm(data);
+      return poll();
+    });
+  }
+  function apiFallback(data){
+    if(RPC_OK[data.action]) return jsonpCall('action=rpc&payload=' + encodeURIComponent(JSON.stringify(data)));
+    if(data.action === 'addPet') return addPetFallback(data);
+    return Promise.reject(new Error(UNREACHABLE));
+  }
+  function apiFetch(data){
     var ctrl = ('AbortController' in window) ? new AbortController() : null;
     var timer = window.setTimeout(function(){ if(ctrl) ctrl.abort(); }, 30000);
     return fetch(API_URL, {method:'POST', body:JSON.stringify(data), redirect:'follow', signal: ctrl ? ctrl.signal : undefined})
@@ -860,10 +921,18 @@ a.card{background:linear-gradient(135deg,#C49369 0%,#BD8A5B 58%,#B98255 100%);co
       })
       .catch(function(err){
         if(err && err.name === 'AbortError') throw new Error('Nag-timeout ang backend. Subukan ulit.');
-        if(err instanceof TypeError) throw new Error('Hindi maabot ang backend. Tingnan ang internet at ang API_URL.');
+        if(err instanceof TypeError){ var e = new Error(UNREACHABLE); e.netfail = true; throw e; }
         throw err;
       })
       .finally(function(){ window.clearTimeout(timer); });
+  }
+  function apiPost(data){
+    if(data.action === 'addPet' && !data.clientId) data.clientId = newId();
+    return apiFetch(data).catch(function(err){
+      if(!err || !err.netfail) throw err;
+      if(window.console && console.warn) console.warn('POST was blocked; using fallback route for', data.action);
+      return apiFallback(data);
+    });
   }
   function loadPets(){
     return new Promise(function(resolve, reject){
