@@ -414,6 +414,29 @@ a{color:#8F472A}
 /* Removed the Make a Pledge panel */
 #pledgeBox{display:none!important}
 
+
+/* Vet finder cards: same brown as the other cards (was white) */
+a.card{background:linear-gradient(135deg,#C49369 0%,#BD8A5B 58%,#B98255 100%);color:#4D302A;border-color:#A98262}
+
+/* Soft warm shadows that blend with the site (no black) */
+.card,.panel,.facts,.settings,.pet,.sum,a.card{box-shadow:3px 4px 0 rgba(168,84,42,.28)}
+.fcard:hover,.fcard:focus-visible,a.card:hover,a.card:focus-visible,.pet:hover{box-shadow:5px 6px 0 rgba(168,84,42,.34)}
+.fcard:active,a.card:active{box-shadow:1px 2px 0 rgba(168,84,42,.34)}
+
+/* Compact adoption history (admin) */
+#adoptionHistory{padding:12px 14px}
+#adoptionHistory h3{font-size:1rem;margin:0 0 8px}
+#adoptedGrid{grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:8px;max-height:260px;overflow-y:auto;padding:2px 6px 6px 2px}
+#adoptedGrid .pet{flex-direction:row;align-items:center;height:auto;border-radius:10px;box-shadow:none;animation:none}
+#adoptedGrid .pet:hover{transform:none;box-shadow:none}
+#adoptedGrid .pet img,#adoptedGrid .pet .ph{width:56px;height:56px;flex:none;aspect-ratio:auto;border-bottom:0;border-radius:10px 0 0 10px;font-size:1.4rem;display:flex;align-items:center;justify-content:center}
+#adoptedGrid .pbody{flex:1;min-width:0;padding:6px 10px;text-align:left;display:grid;grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"n b" "t b" "d b";column-gap:8px;align-items:center}
+#adoptedGrid .pbody h3{grid-area:n;font-size:.9rem;margin:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#adoptedGrid .pbody p{font-size:.74rem;margin:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#adoptedGrid .pbody p:nth-of-type(1){grid-area:t}
+#adoptedGrid .pbody p:nth-of-type(2){display:none}
+#adoptedGrid .pbody p.note{grid-area:d}
+#adoptedGrid .pbody>.btn.sm{grid-area:b;width:auto;margin:0;padding:4px 10px;font-size:.72rem;box-shadow:none}
 /* Hero slideshow */
 .gear-ico{width:24px;height:24px;display:block;pointer-events:none}
 .hslides{position:absolute;inset:0;overflow:hidden;background:#4D302A}
@@ -820,7 +843,7 @@ a{color:#8F472A}
   });
   function val(id){ return document.getElementById(id).value.trim(); }
   var adPhoto = '', adOut = document.getElementById('adOut');
-  var API_URL = 'https://script.google.com/macros/s/AKfycbx18Bw0oBO9_e8nkNqOHKZCf7bQziy8iAZ1m_jCRUSQ195t2EinSkRW4rMF16o3DVaa/exec';
+  var API_URL = 'https://script.google.com/macros/s/AKfycbyh5pjHGZkKSOaOuodxHMdD93het8X491MMvq_TS0nMKw2QmbDA5bun5JaFP0aYA9a9Cg/exec';
   var apiToken = '';
   var pets = [], adoptedPets = [];
   var ADOPTION_FORM_URL = 'https://docs.google.com/forms/d/e/1FAIpQLSdWVohTxUPL0DdRdDUi1yyeIdmtBq3AkYVWKzDETgiyXIDMYQ/viewform';
