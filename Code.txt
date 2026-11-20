@@ -9,10 +9,14 @@
  *   POST { action:'addPet', token, name, type, otherType, gender, description, photoBase64 }
  *   POST { action:'adoptPet', token, id }
  *   POST { action:'deletePet', token, id }   -> binubura ang row at ang litrato
+ *   GET  ?action=rpc&payload={...}&callback=fn  -> fallback para sa login/logout/adoptPet/deletePet
+ *                                               kapag hinarang ng browser ang POST (CORS/network)
+ *   Ang lahat ng aksyon ay idempotent: ligtas ulitin kung hindi nakita ang sagot.
  *
  * SETUP: tingnan ang README.md
  */
 
+var BACKEND_VERSION = '4';   // lumalabas sa ?action=list para makumpirma kung bago ang deployed code
 var SHEET_NAME   = 'Pets';
 var HEADERS      = ['id','name','type','otherType','gender','description','photoFileId','status','createdAt','adoptedAt'];
 var TOKEN_TTL    = 21600;   // 6 oras (max ng CacheService)
@@ -61,6 +65,12 @@ function doGet(e) {
   var out;
   try {
     if (!p.action || p.action === 'list') out = listPets_(p.token);
+    else if (p.action === 'rpc') {
+      var data;
+      try { data = JSON.parse(p.payload || ''); } catch (x) { throw new UserError('Sira ang request na natanggap.'); }
+      if (RPC_ACTIONS.indexOf(data.action) < 0) out = fail_('Hindi pinapayagan ang action na ito sa GET.');
+      else out = dispatch_(data);
+    }
     else out = fail_('Hindi kilalang action.');
   } catch (err) { out = handleError_(err); }
   return respond_(out, p.callback);
@@ -72,19 +82,26 @@ function doPost(e) {
     var raw = (e && e.parameter && e.parameter.payload) || (e && e.postData && e.postData.contents) || '';
     var data;
     try { data = JSON.parse(raw); } catch (x) { throw new UserError('Sira ang request na natanggap.'); }
-    switch (data.action) {
-      case 'login':    out = login_(data); break;
-      case 'logout':   out = logout_(data); break;
-      case 'addPet':   out = withLock_(function () { return addPet_(data); }); break;
-      case 'adoptPet': out = withLock_(function () { return adoptPet_(data); }); break;
-      case 'deletePet': out = withLock_(function () { return deletePet_(data); }); break;
-      default:         out = fail_('Hindi kilalang action.');
-    }
+    out = dispatch_(data);
   } catch (err) { out = handleError_(err); }
   return respond_(out, null);
 }
 
 /* ---------- ACTIONS ---------- */
+var RPC_ACTIONS = ['login', 'logout', 'adoptPet', 'deletePet', 'checkClient'];
+
+function dispatch_(data) {
+  switch (data.action) {
+    case 'login':     return login_(data);
+    case 'logout':    return logout_(data);
+    case 'addPet':    return withLock_(function () { return addPet_(data); });
+    case 'adoptPet':  return withLock_(function () { return adoptPet_(data); });
+    case 'deletePet': return withLock_(function () { return deletePet_(data); });
+    case 'checkClient': return { success: true, found: !!CacheService.getScriptCache().get('cid_' + clean_(data.clientId, 64)) };
+    default:          return fail_('Hindi kilalang action.');
+  }
+}
+
 function listPets_(token) {
   var isAdmin = !!token && isValidToken_(token);
   var rows = readRows_();
@@ -93,7 +110,7 @@ function listPets_(token) {
     if (r.status === 'adopted') history.push(toPublic_(r));
     else pets.push(toPublic_(r));
   });
-  return { success: true, pets: pets, history: isAdmin ? history : [] };
+  return { success: true, version: BACKEND_VERSION, pets: pets, history: isAdmin ? history : [] };
 }
 
 function login_(d) {
@@ -134,6 +151,14 @@ function addPet_(d) {
   if (type === 'other' && !other) return fail_('Ilagay kung anong hayop (Other).');
   if (type !== 'other') other = '';
 
+  // Idempotent: kung naulit ang parehong request (clientId), ibalik ang dati nang nagawa
+  var cid = clean_(d.clientId, 64);
+  var cache = CacheService.getScriptCache();
+  if (cid) {
+    var existing = cache.get('cid_' + cid);
+    if (existing) return { success: true, id: existing, already: true };
+  }
+
   var id = Utilities.getUuid();
   var fileId = '';
   if (d.photoBase64) fileId = savePhoto_(d.photoBase64, name, id);
@@ -142,6 +167,7 @@ function addPet_(d) {
   var sh = getSheet_();
   var target = sh.getLastRow() + 1;
   sh.getRange(target, 1, 1, HEADERS.length).setNumberFormat('@').setValues([row]);
+  if (cid) cache.put('cid_' + cid, id, 600);
   return { success: true, id: id };
 }
 
@@ -155,7 +181,7 @@ function adoptPet_(d) {
     if (String(ids[i][0]) === String(d.id)) {
       var rowNum = i + 2;
       var status = sh.getRange(rowNum, 8).getValue();
-      if (status === 'adopted') return fail_('Naka-adopt na ang hayop na ito.');
+      if (status === 'adopted') return { success: true, already: true };
       sh.getRange(rowNum, 8, 1, 3).setValues([['adopted', sh.getRange(rowNum, 9).getValue(), new Date().toISOString()]]);
       return { success: true };
     }
@@ -167,7 +193,7 @@ function deletePet_(d) {
   requireAdmin_(d.token);
   var sh = getSheet_();
   var last = sh.getLastRow();
-  if (last < 2) return fail_('Walang nakitang hayop.');
+  if (last < 2) return { success: true, already: true };
   var ids = sh.getRange(2, 1, last - 1, 1).getValues();
   for (var i = 0; i < ids.length; i++) {
     if (String(ids[i][0]) === String(d.id)) {
@@ -178,7 +204,7 @@ function deletePet_(d) {
       return { success: true };
     }
   }
-  return fail_('Hindi nahanap ang hayop.');
+  return { success: true, already: true };
 }
 
 /* ---------- HELPERS ---------- */
