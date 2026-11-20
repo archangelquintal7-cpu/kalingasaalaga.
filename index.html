@@ -856,15 +856,22 @@ a{color:#8F472A}
     r.readAsDataURL(f);
   });
 
+  var DELT = {
+    en:{btn:'Delete', confirm:'Delete this listing permanently? This also removes its photo and cannot be undone.', fail:'Could not delete the listing.'},
+    fil:{btn:'Burahin', confirm:'Permanenteng burahin ang listing na ito? Buburahin din ang litrato at hindi na ito maibabalik.', fail:'Hindi nabura ang listing.'}
+  };
   function petCard(p, t, isHistory){
     var typ = p.k === 'dog' ? t.ad_t1 : (p.k === 'cat' ? t.ad_t2 : (p.o || t.ad_t3));
     var genderText = p.gender === 'male' ? t.ad_g1 : (p.gender === 'female' ? t.ad_g2 : (p.gender ? t.ad_g3 : ''));
     var details = p.description || '';
     var img = p.photo ? '<img src="'+esc(p.photo)+'" alt="'+esc(p.name)+'" loading="lazy">' : '<div class="ph" aria-hidden="true">🐾</div>';
     var action = '';
-    if(isHistory){ action = '<p class="note">Adopted'+(p.adoptedAt ? ' · '+new Date(p.adoptedAt).toLocaleDateString() : '')+'</p>'; }
-    else if(document.body.classList.contains('admin-mode')){
-      action = '<button class="btn sm" type="button" data-act="adopted" data-id="'+esc(p.id)+'">'+t.al_adopted+'</button>';
+    var isAdmin = document.body.classList.contains('admin-mode');
+    var D = DELT[lang] || DELT.en;
+    var delBtn = '<button class="btn sm" type="button" data-act="delete" data-id="'+esc(p.id)+'">'+D.btn+'</button>';
+    if(isHistory){ action = '<p class="note">Adopted'+(p.adoptedAt ? ' · '+new Date(p.adoptedAt).toLocaleDateString() : '')+'</p>'+(isAdmin ? delBtn : ''); }
+    else if(isAdmin){
+      action = '<div class="dacts"><button class="btn sm" type="button" data-act="adopted" data-id="'+esc(p.id)+'">'+t.al_adopted+'</button>'+delBtn+'</div>';
     } else {
       action = '<a class="btn sm" href="'+ADOPTION_FORM_URL+'" target="_blank" rel="noopener noreferrer">'+t.al_adopt+'</a>';
     }
@@ -878,7 +885,7 @@ a{color:#8F472A}
     var hist = document.getElementById('adoptionHistory');
     if(hist) hist.hidden = !document.body.classList.contains('admin-mode');
   }
-  document.getElementById('petGrid').addEventListener('click',function(e){
+  function petAction(e){
     var b = e.target.closest('[data-act]'); if(!b) return;
     if(b.dataset.act === 'adopted' && document.body.classList.contains('admin-mode')){
       b.disabled = true;
@@ -887,7 +894,18 @@ a{color:#8F472A}
         return loadPets();
       }).catch(function(err){ alert(err.message); b.disabled = false; });
     }
-  });
+    if(b.dataset.act === 'delete' && document.body.classList.contains('admin-mode')){
+      var D = DELT[lang] || DELT.en;
+      if(!window.confirm(D.confirm)) return;
+      b.disabled = true;
+      apiPost({action:'deletePet', token:apiToken, id:b.dataset.id}).then(function(result){
+        if(!result || !result.success) throw new Error((result && result.message) || D.fail);
+        return loadPets();
+      }).catch(function(err){ alert(err.message); b.disabled = false; });
+    }
+  }
+  document.getElementById('petGrid').addEventListener('click', petAction);
+  document.getElementById('adoptedGrid').addEventListener('click', petAction);
 
   document.getElementById('adSend').addEventListener('click',function(){
     var t = T[lang], name = val('adName'), gender = val('adGender'), description = val('adDescription'), sel = document.getElementById('adType');
